@@ -7,7 +7,7 @@ const admin = require("firebase-admin");
 
 const app = express();
 
-
+// ONLY ALLOW YOUR FRONTEND
 app.use(cors({
   origin: "https://movie-review-platform-c0a26.web.app"
 }));
@@ -39,7 +39,7 @@ app.get("/api/movies/popular", async (req, res) => {
 // Search Movies
 app.get("/api/movies/search", async (req, res) => {
   const { query } = req.query;
-  if (!query) return res.status(400).json({ error: "Query required" });
+  if (!query?.trim()) return res.status(400).json({ error: "Query required" });
   try {
     const r = await axios.get(`${TMDB}/search/movie?api_key=${TMDB_KEY}&query=${encodeURIComponent(query)}`);
     res.json(r.data);
@@ -52,6 +52,7 @@ app.get("/api/movies/search", async (req, res) => {
 // Movie Details
 app.get("/api/movies/:id", async (req, res) => {
   const { id } = req.params;
+  if (!id) return res.status(400).json({ error: "Movie ID required" });
   try {
     const r = await axios.get(`${TMDB}/movie/${id}?api_key=${TMDB_KEY}`);
     res.json(r.data);
@@ -74,17 +75,20 @@ const auth = async (req, res, next) => {
   }
 };
 
-// Get Reviews for Movie
+// Get Reviews for Movie (NO ORDERBY TO AVOID INDEX ERROR)
 app.get("/api/reviews/:movieId", async (req, res) => {
+  const { movieId } = req.params;
+  if (!movieId) return res.status(400).json({ error: "movieId required" });
+
   try {
     const snap = await db.collection("reviews")
-      .where("movieId", "==", req.params.movieId)
-      .orderBy("createdAt", "desc")
-      .get();
+      .where("movieId", "==", movieId)
+      .get();  // Removed .orderBy to avoid index error
+
     const reviews = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    res.json(reviews);
+    res.json(reviews || []);  // Always return array
   } catch (err) {
-    console.error("Get reviews error:", err);
+    console.error("Get reviews error:", err.message);
     res.status(500).json({ error: "Failed to load reviews" });
   }
 });
@@ -105,7 +109,7 @@ app.post("/api/reviews", auth, async (req, res) => {
     });
     res.json({ id: doc.id });
   } catch (err) {
-    console.error("Post review error:", err);
+    console.error("Post review error:", err.message);
     res.status(500).json({ error: "Submit failed" });
   }
 });
@@ -126,7 +130,7 @@ app.put("/api/reviews/:id", auth, async (req, res) => {
     });
     res.json({ success: true });
   } catch (err) {
-    console.error("Update error:", err);
+    console.error("Update error:", err.message);
     res.status(500).json({ error: "Update failed" });
   }
 });
@@ -142,7 +146,7 @@ app.delete("/api/reviews/:id", auth, async (req, res) => {
     await ref.delete();
     res.json({ success: true });
   } catch (err) {
-    console.error("Delete error:", err);
+    console.error("Delete error:", err.message);
     res.status(500).json({ error: "Delete failed" });
   }
 });
@@ -152,12 +156,11 @@ app.get("/api/user/reviews", auth, async (req, res) => {
   try {
     const snap = await db.collection("reviews")
       .where("userId", "==", req.user.uid)
-      .orderBy("createdAt", "desc")
       .get();
     const reviews = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    res.json(reviews);
+    res.json(reviews || []);
   } catch (err) {
-    console.error("User reviews error:", err);
+    console.error("User reviews error:", err.message);
     res.status(500).json({ error: "Failed to load" });
   }
 });
