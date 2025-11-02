@@ -6,7 +6,12 @@ const axios = require("axios");
 const admin = require("firebase-admin");
 
 const app = express();
-app.use(cors());
+
+
+app.use(cors({
+  origin: "https://movie-review-platform-c0a26.web.app"
+}));
+
 app.use(express.json());
 
 // ---- Firebase Admin ----
@@ -20,89 +25,146 @@ const db = admin.firestore();
 const TMDB_KEY = process.env.TMDB_API_KEY;
 const TMDB = "https://api.themoviedb.org/3";
 
-// Popular
+// Popular Movies
 app.get("/api/movies/popular", async (req, res) => {
   try {
     const r = await axios.get(`${TMDB}/movie/popular?api_key=${TMDB_KEY}`);
     res.json(r.data);
   } catch (e) {
-    console.error("TMDB error:", e.message);
+    console.error("TMDB Popular Error:", e.message);
     res.status(500).json({ error: "TMDB failed" });
   }
 });
 
-// Search
+// Search Movies
 app.get("/api/movies/search", async (req, res) => {
   const { query } = req.query;
+  if (!query) return res.status(400).json({ error: "Query required" });
   try {
     const r = await axios.get(`${TMDB}/search/movie?api_key=${TMDB_KEY}&query=${encodeURIComponent(query)}`);
     res.json(r.data);
   } catch (e) {
+    console.error("TMDB Search Error:", e.message);
     res.status(500).json({ error: "Search failed" });
   }
 });
 
-// Movie details
+// Movie Details
 app.get("/api/movies/:id", async (req, res) => {
   const { id } = req.params;
   try {
     const r = await axios.get(`${TMDB}/movie/${id}?api_key=${TMDB_KEY}`);
     res.json(r.data);
   } catch (e) {
-    res.status(500).json({ error: "Movie not found" });
+    console.error("TMDB Movie Error:", e.message);
+    res.status(404).json({ error: "Movie not found" });
   }
 });
 
 // ---- Reviews (Firestore) ----
 const auth = async (req, res, next) => {
   const token = req.headers.authorization?.split("Bearer ")[1];
-  if (!token) return res.status(401).send("No token");
+  if (!token) return res.status(401).json({ error: "No token" });
   try {
     req.user = await admin.auth().verifyIdToken(token);
     next();
-  } catch {
-    res.status(401).send("Invalid token");
+  } catch (err) {
+    console.error("Auth error:", err.message);
+    res.status(401).json({ error: "Invalid token" });
   }
 };
 
+// Get Reviews for Movie
 app.get("/api/reviews/:movieId", async (req, res) => {
-  const snap = await db.collection("reviews").where("movieId", "==", req.params.movieId).get();
-  res.json(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+  try {
+    const snap = await db.collection("reviews")
+      .where("movieId", "==", req.params.movieId)
+      .orderBy("createdAt", "desc")
+      .get();
+    const reviews = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    res.json(reviews);
+  } catch (err) {
+    console.error("Get reviews error:", err);
+    res.status(500).json({ error: "Failed to load reviews" });
+  }
 });
 
+// Add Review
 app.post("/api/reviews", auth, async (req, res) => {
   const { movieId, rating, reviewText } = req.body;
-  const doc = await db.collection("reviews").add({
-    userId: req.user.uid,
-    movieId,
-    rating,
-    reviewText,
-    createdAt: admin.firestore.FieldValue.serverTimestamp(),
-  });
-  res.json({ id: doc.id });
+  if (!movieId || !rating || !reviewText?.trim()) {
+    return res.status(400).json({ error: "Missing fields" });
+  }
+  try {
+    const doc = await db.collection("reviews").add({
+      userId: req.user.uid,
+      movieId,
+      rating: Number(rating),
+      reviewText: reviewText.trim(),
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    res.json({ id: doc.id });
+  } catch (err) {
+    console.error("Post review error:", err);
+    res.status(500).json({ error: "Submit failed" });
+  }
 });
 
+// Update Review
 app.put("/api/reviews/:id", auth, async (req, res) => {
+  const { rating, reviewText } = req.body;
   const ref = db.collection("reviews").doc(req.params.id);
-  const doc = await ref.get();
-  if (!doc.exists || doc.data().userId !== req.user.uid) return res.status(403).send("Forbidden");
-  await ref.update(req.body);
-  res.send("Updated");
+  try {
+    const doc = await ref.get();
+    if (!doc.exists || doc.data().userId !== req.user.uid) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+    await ref.update({
+      rating: Number(rating),
+      reviewText: reviewText.trim(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Update error:", err);
+    res.status(500).json({ error: "Update failed" });
+  }
 });
 
+// Delete Review
 app.delete("/api/reviews/:id", auth, async (req, res) => {
   const ref = db.collection("reviews").doc(req.params.id);
-  const doc = await ref.get();
-  if (!doc.exists || doc.data().userId !== req.user.uid) return res.status(403).send("Forbidden");
-  await ref.delete();
-  res.send("Deleted");
+  try {
+    const doc = await ref.get();
+    if (!doc.exists || doc.data().userId !== req.user.uid) {
+      return res.status(403).json({ error: "Forbidden" });
+    }
+    await ref.delete();
+    res.json({ success: true });
+  } catch (err) {
+    console.error("Delete error:", err);
+    res.status(500).json({ error: "Delete failed" });
+  }
 });
 
+// Get User's Reviews
 app.get("/api/user/reviews", auth, async (req, res) => {
-  const snap = await db.collection("reviews").where("userId", "==", req.user.uid).get();
-  res.json(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+  try {
+    const snap = await db.collection("reviews")
+      .where("userId", "==", req.user.uid)
+      .orderBy("createdAt", "desc")
+      .get();
+    const reviews = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    res.json(reviews);
+  } catch (err) {
+    console.error("User reviews error:", err);
+    res.status(500).json({ error: "Failed to load" });
+  }
 });
 
-// ---- Start ----
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`Backend running on ${PORT}`));
+// ---- Start Server ----
+const PORT = process.env.PORT || 10000;
+app.listen(PORT, () => {
+  console.log(`Backend running on port ${PORT}`);
+  console.log(`Frontend allowed: https://movie-review-platform-c0a26.web.app`);
+});
