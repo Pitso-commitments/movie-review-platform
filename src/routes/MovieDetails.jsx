@@ -1,8 +1,9 @@
+// src/routes/MovieDetails.jsx
 import React, { useEffect, useState } from "react";
 import { useParams } from "react-router-dom";
-import axios from "axios";
 import { useAuthState } from "react-firebase-hooks/auth";
 import { auth } from "../firebase";
+import { api } from "../api";
 import {
   Card,
   Button,
@@ -29,29 +30,32 @@ export default function MovieDetails() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleteId, setDeleteId] = useState(null);
 
-  // === FETCH MOVIE & REVIEWS ===
+  // FETCH MOVIE & REVIEWS
   useEffect(() => {
     const fetchData = async () => {
       try {
         setLoading(true);
-        const [movieRes, reviewsRes] = await Promise.all([
-          axios.get(`http://localhost:5000/api/movies/${id}`),
-          axios.get(`http://localhost:5000/api/reviews/${id}`),
-        ]);
-        setMovie(movieRes.data);
-        setReviews(reviewsRes.data);
         setError("");
+
+        const [movieData, reviewsData] = await Promise.all([
+          api.getMovie(id),
+          api.getReviews(id),
+        ]);
+
+        setMovie(movieData);
+        setReviews(reviewsData);
       } catch (err) {
-        console.error(err);
-        setError("Failed to load data. Is backend running?");
+        console.error("Fetch error:", err);
+        setError("Failed to load movie or reviews.");
       } finally {
         setLoading(false);
       }
     };
+
     if (id) fetchData();
   }, [id]);
 
-  // === CRUD FUNCTIONS ===
+  // SUBMIT NEW REVIEW
   const submitReview = async (e) => {
     e.preventDefault();
     if (!user) return setError("Login required");
@@ -59,87 +63,96 @@ export default function MovieDetails() {
 
     try {
       const token = await user.getIdToken();
-      await axios.post(
-        "http://localhost:5000/api/reviews",
+      await api.postReview(
         { ...newReview, movieId: id },
-        { headers: { Authorization: `Bearer ${token}` } }
+        token
       );
+
       setNewReview({ rating: 5, reviewText: "" });
-      const res = await axios.get(`http://localhost:5000/api/reviews/${id}`);
-      setReviews(res.data);
+      const updatedReviews = await api.getReviews(id);
+      setReviews(updatedReviews);
       setError("");
     } catch (err) {
-      setError("Submit failed");
-    }
-  };
+        console.error("Submit error:", err);
+        setError("Failed to submit review");
+      }
+    };
 
+  // UPDATE REVIEW
   const updateReview = async (e) => {
     e.preventDefault();
     try {
       const token = await user.getIdToken();
-      await axios.put(
-        `http://localhost:5000/api/reviews/${editingId}`,
-        editReview,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
+      await api.putReview(editingId, editReview, token);
       setEditingId(null);
-      const res = await axios.get(`http://localhost:5000/api/reviews/${id}`);
-      setReviews(res.data);
+      const updatedReviews = await api.getReviews(id);
+      setReviews(updatedReviews);
     } catch (err) {
-      setError("Update failed");
+      console.error("Update error:", err);
+      setError("Failed to update review");
     }
   };
 
+  // DELETE REVIEW
   const deleteReview = async () => {
     try {
       const token = await user.getIdToken();
-      await axios.delete(`http://localhost:5000/api/reviews/${deleteId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      await api.deleteReview(deleteId, token);
       setShowDeleteModal(false);
-      const res = await axios.get(`http://localhost:5000/api/reviews/${id}`);
-      setReviews(res.data);
+      const updatedReviews = await api.getReviews(id);
+      setReviews(updatedReviews);
     } catch (err) {
-      setError("Delete failed");
+      console.error("Delete error:", err);
+      setError("Failed to delete review");
     }
   };
 
-  // === CALCULATIONS ===
-  const avgRating = reviews.length
+  // CALCULATE AVERAGE RATING
+  const avgRating = Array.isArray(reviews) && reviews.length
     ? (reviews.reduce((s, r) => s + r.rating, 0) / reviews.length).toFixed(1)
     : "—";
 
-  const yourReview = user ? reviews.find((r) => r.userId === user.uid) : null;
-  const otherReviews = reviews.filter(
-    (r) => !user || r.userId !== user.uid
-  );
+  // SAFELY FIND USER'S REVIEW
+  const yourReview = user && Array.isArray(reviews)
+    ? reviews.find(r => r.userId === user.uid)
+    : null;
 
-  
-  if (loadingAuth)
+  // SAFELY FILTER OTHER REVIEWS
+  const otherReviews = Array.isArray(reviews)
+    ? reviews.filter(r => !user || r.userId !== user.uid)
+    : [];
+
+  // LOADING STATES
+  if (loadingAuth) {
     return (
       <div className="text-center mt-5">
         <Spinner animation="border" />
         <p>Loading user...</p>
       </div>
     );
+  }
 
-  if (errorAuth)
+  if (errorAuth) {
     return <Alert variant="danger">Auth error: {errorAuth.message}</Alert>;
+  }
 
-  if (loading)
+  if (loading) {
     return (
       <div className="text-center mt-5">
         <Spinner animation="border" />
         <p>Loading movie...</p>
       </div>
     );
+  }
 
-  if (!movie) return <Alert variant="warning">Movie not found</Alert>;
+  if (!movie) {
+    return <Alert variant="warning">Movie not found</Alert>;
+  }
 
-  // === MAIN UI ===
+  // MAIN RENDER
   return (
     <div className="container mt-4">
-      {/* Header */}
+      {/* Movie Header */}
       <Row>
         <Col md={4}>
           <img
@@ -155,8 +168,10 @@ export default function MovieDetails() {
         </Col>
         <Col md={8}>
           <h2>{movie.title}</h2>
-          <p className="text-muted">{movie.release_date?.split("-")[0]}</p>
-          <p>{movie.overview}</p>
+          <p className="text-muted">
+            {movie.release_date?.split("-")[0] || "N/A"}
+          </p>
+          <p>{movie.overview || "No overview available."}</p>
           <h4>
             Average Rating: <Badge bg="warning">{avgRating}/10</Badge>
             {reviews.length > 0 && (
@@ -166,12 +181,15 @@ export default function MovieDetails() {
         </Col>
       </Row>
 
+      {/* Error Alert */}
       {error && <Alert variant="danger" className="mt-3">{error}</Alert>}
 
       {/* Your Review */}
       {yourReview && (
         <Card className="mt-4 border-primary">
-          <Card.Header className="bg-primary text-white">Your Review</Card.Header>
+          <Card.Header className="bg-primary text-white">
+            Your Review
+          </Card.Header>
           <Card.Body>
             <h5>Rating: {yourReview.rating}/10</h5>
             <p>{yourReview.reviewText}</p>
@@ -230,14 +248,14 @@ export default function MovieDetails() {
         </>
       )}
 
-      {/* Add Review */}
+      {/* Add Review Form */}
       {user && !yourReview && !editingId && (
         <Card className="mt-4">
-          <Card.Header>Add Review</Card.Header>
+          <Card.Header>Add Your Review</Card.Header>
           <Card.Body>
             <Form onSubmit={submitReview}>
               <Form.Group className="mb-3">
-                <Form.Label>Rating</Form.Label>
+                <Form.Label>Rating (1–10)</Form.Label>
                 <Form.Control
                   type="number"
                   min="1"
@@ -252,7 +270,7 @@ export default function MovieDetails() {
                 />
               </Form.Group>
               <Form.Group className="mb-3">
-                <Form.Label>Review</Form.Label>
+                <Form.Label>Your Review</Form.Label>
                 <Form.Control
                   as="textarea"
                   rows={3}
@@ -260,18 +278,23 @@ export default function MovieDetails() {
                   onChange={(e) =>
                     setNewReview({ ...newReview, reviewText: e.target.value })
                   }
+                  placeholder="Share your thoughts..."
                 />
               </Form.Group>
-              <Button type="submit">Submit</Button>
+              <Button type="submit" variant="primary">
+                Submit Review
+              </Button>
             </Form>
           </Card.Body>
         </Card>
       )}
 
-      {/* Edit Form */}
+      {/* Edit Review Form */}
       {editingId && (
         <Card className="mt-4 border-warning">
-          <Card.Header className="bg-warning">Edit Review</Card.Header>
+          <Card.Header className="bg-warning text-dark">
+            Edit Your Review
+          </Card.Header>
           <Card.Body>
             <Form onSubmit={updateReview}>
               <Form.Group className="mb-3">
@@ -315,14 +338,19 @@ export default function MovieDetails() {
         </Card>
       )}
 
-      {/* Delete Modal */}
+      {/* Delete Confirmation Modal */}
       <Modal show={showDeleteModal} onHide={() => setShowDeleteModal(false)}>
         <Modal.Header closeButton>
-          <Modal.Title>Delete?</Modal.Title>
+          <Modal.Title>Delete Review?</Modal.Title>
         </Modal.Header>
-        <Modal.Body>Can't undo.</Modal.Body>
+        <Modal.Body>
+          This action cannot be undone.
+        </Modal.Body>
         <Modal.Footer>
-          <Button variant="secondary" onClick={() => setShowDeleteModal(false)}>
+          <Button
+            variant="secondary"
+            onClick={() => setShowDeleteModal(false)}
+          >
             Cancel
           </Button>
           <Button variant="danger" onClick={deleteReview}>
