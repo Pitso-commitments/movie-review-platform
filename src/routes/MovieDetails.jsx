@@ -73,10 +73,10 @@ export default function MovieDetails() {
       setReviews(updatedReviews);
       setError("");
     } catch (err) {
-        console.error("Submit error:", err);
-        setError("Failed to submit review");
-      }
-    };
+      console.error("Submit error:", err);
+      setError("Failed to submit review");
+    }
+  };
 
   // UPDATE REVIEW
   const updateReview = async (e) => {
@@ -107,17 +107,15 @@ export default function MovieDetails() {
     }
   };
 
-  // CALCULATE AVERAGE RATING
+  // SAFE CALCULATIONS
   const avgRating = Array.isArray(reviews) && reviews.length
     ? (reviews.reduce((s, r) => s + r.rating, 0) / reviews.length).toFixed(1)
     : "—";
 
-  // SAFELY FIND USER'S REVIEW
   const yourReview = user && Array.isArray(reviews)
     ? reviews.find(r => r.userId === user.uid)
     : null;
 
-  // SAFELY FILTER OTHER REVIEWS
   const otherReviews = Array.isArray(reviews)
     ? reviews.filter(r => !user || r.userId !== user.uid)
     : [];
