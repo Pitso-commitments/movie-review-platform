@@ -75,7 +75,7 @@ const auth = async (req, res, next) => {
   }
 };
 
-// Get Reviews for Movie (NO ORDERBY TO AVOID INDEX ERROR)
+// Get Reviews for Movie
 app.get("/api/reviews/:movieId", async (req, res) => {
   const { movieId } = req.params;
   if (!movieId) return res.status(400).json({ error: "movieId required" });
@@ -83,10 +83,18 @@ app.get("/api/reviews/:movieId", async (req, res) => {
   try {
     const snap = await db.collection("reviews")
       .where("movieId", "==", movieId)
-      .get();  // Removed .orderBy to avoid index error
+      .get();
 
-    const reviews = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    res.json(reviews || []);  // Always return array
+    const reviews = snap.docs.map(d => {
+      const data = d.data();
+      return {
+        id: d.id,
+        ...data,
+        createdAt: data.createdAt?.toDate?.().toISOString() || new Date().toISOString()
+      };
+    });
+
+    res.json(reviews);
   } catch (err) {
     console.error("Get reviews error:", err.message);
     res.status(500).json({ error: "Failed to load reviews" });
@@ -105,7 +113,7 @@ app.post("/api/reviews", auth, async (req, res) => {
       movieId,
       rating: Number(rating),
       reviewText: reviewText.trim(),
-      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+      createdAt: admin.firestore.Timestamp.now(),
     });
     res.json({ id: doc.id });
   } catch (err) {
@@ -126,7 +134,7 @@ app.put("/api/reviews/:id", auth, async (req, res) => {
     await ref.update({
       rating: Number(rating),
       reviewText: reviewText.trim(),
-      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.Timestamp.now(),
     });
     res.json({ success: true });
   } catch (err) {
@@ -151,23 +159,9 @@ app.delete("/api/reviews/:id", auth, async (req, res) => {
   }
 });
 
-// Get User's Reviews
-app.get("/api/user/reviews", auth, async (req, res) => {
-  try {
-    const snap = await db.collection("reviews")
-      .where("userId", "==", req.user.uid)
-      .get();
-    const reviews = snap.docs.map(d => ({ id: d.id, ...d.data() }));
-    res.json(reviews || []);
-  } catch (err) {
-    console.error("User reviews error:", err.message);
-    res.status(500).json({ error: "Failed to load" });
-  }
-});
-
 // ---- Start Server ----
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
-  console.log(`Backend running on port ${PORT}`);
+  console.log(`Backend LIVE on port ${PORT}`);
   console.log(`Frontend allowed: https://movie-review-platform-c0a26.web.app`);
 });
