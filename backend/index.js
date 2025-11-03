@@ -62,7 +62,7 @@ app.get("/api/movies/:id", async (req, res) => {
   }
 });
 
-// ---- Reviews (Firestore) ----
+// ---- Auth Middleware ----
 const auth = async (req, res, next) => {
   const token = req.headers.authorization?.split("Bearer ")[1];
   if (!token) return res.status(401).json({ error: "No token" });
@@ -89,7 +89,10 @@ app.get("/api/reviews/:movieId", async (req, res) => {
       const data = d.data();
       return {
         id: d.id,
-        ...data,
+        userId: data.userId,
+        movieId: data.movieId,
+        rating: data.rating,
+        reviewText: data.reviewText,
         createdAt: data.createdAt?.toDate?.().toISOString() || new Date().toISOString()
       };
     });
@@ -156,6 +159,32 @@ app.delete("/api/reviews/:id", auth, async (req, res) => {
   } catch (err) {
     console.error("Delete error:", err.message);
     res.status(500).json({ error: "Delete failed" });
+  }
+});
+
+// GET USER'S REVIEWS (NEW!)
+app.get("/api/user/reviews", auth, async (req, res) => {
+  try {
+    const snap = await db.collection("reviews")
+      .where("userId", "==", req.user.uid)
+      .orderBy("createdAt", "desc")
+      .get();
+
+    const reviews = snap.docs.map(d => {
+      const data = d.data();
+      return {
+        id: d.id,
+        movieId: data.movieId,
+        rating: data.rating,
+        reviewText: data.reviewText,
+        createdAt: data.createdAt?.toDate?.().toISOString() || new Date().toISOString()
+      };
+    });
+
+    res.json(reviews);
+  } catch (err) {
+    console.error("User reviews error:", err.message);
+    res.status(500).json({ error: "Failed to load your reviews" });
   }
 });
 
