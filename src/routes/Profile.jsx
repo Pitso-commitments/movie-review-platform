@@ -1,85 +1,77 @@
+// src/routes/Profile.jsx
 import React, { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import axios from "axios";
 import { useAuthState } from "react-firebase-hooks/auth";
 import { auth } from "../firebase";
-import { Card, Button, Row, Col, Alert, Badge } from "react-bootstrap";
+import { api } from "../api";
+import { Link } from "react-router-dom";
+import { Button, Alert, Spinner, Card } from "react-bootstrap";
 
 export default function Profile() {
-  const navigate = useNavigate();
-  const [user, loading, error] = useAuthState(auth); // ← Fixed
-
-  const [myReviews, setMyReviews] = useState([]);
-  const [loadingReviews, setLoadingReviews] = useState(true);
+  const [user, loadingAuth] = useAuthState(auth);
+  const [reviews, setReviews] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
 
   useEffect(() => {
-    if (!user && !loading) {
-      navigate("/login");
-    }
-    if (user) {
-      fetchMyReviews();
-    }
-  }, [user, loading]);
+    const fetchReviews = async () => {
+      if (!user) return;
+      try {
+        setLoading(true);
+        const token = await user.getIdToken();
+        const data = await api.getUserReviews(token);
+        setReviews(data);
+      } catch (err) {
+        setError("Failed to load reviews");
+      } finally {
+        setLoading(false);
+      }
+    };
+    fetchReviews();
+  }, [user]);
 
-  const fetchMyReviews = async () => {
-    try {
-      const token = await user.getIdToken();
-      const res = await axios.get("http://localhost:5000/api/user/reviews", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      setMyReviews(res.data);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoadingReviews(false);
-    }
-  };
+  const handleLogout = () => auth.signOut();
 
-  if (loading) return <p className="text-center">Loading user...</p>;
-  if (error) return <Alert variant="danger">Error: {error.message}</Alert>;
+  if (loadingAuth) return <div className="text-center mt-5"><Spinner /></div>;
+  if (!user) return <Alert variant="warning">Not logged in</Alert>;
 
   return (
-    <div className="mt-4">
-      <h2>Your Reviews ({myReviews.length})</h2>
-      {user && (
-        <p>
-          Logged in as: <strong>{user.email}</strong> |{" "}
-          <Button size="sm" variant="outline-danger" onClick={() => auth.signOut()}>
-            Logout
-          </Button>
-        </p>
-      )}
+    <div className="container mt-4">
+      <h2>Your Reviews ({reviews.length})</h2>
 
-      {loadingReviews ? (
-        <p>Loading your reviews...</p>
-      ) : myReviews.length === 0 ? (
-        <p>No reviews yet. <a href="/">Start reviewing!</a></p>
+      <p>
+        Logged in as: <strong>{user.email}</strong> | 
+        <Button variant="outline-danger" size="sm" className="ms-2" onClick={handleLogout}>
+          Logout
+        </Button>
+      </p>
+
+      {error && <Alert variant="danger">{error}</Alert>}
+
+      {loading ? (
+        <div className="text-center"><Spinner /></div>
+      ) : reviews.length === 0 ? (
+        <p>
+          No reviews yet. <Link to="/">Start reviewing!</Link>
+        </p>
       ) : (
-        <Row>
-          {myReviews.map((review) => (
-            <Col md={6} lg={4} key={review.id} className="mb-3">
+        <div className="row">
+          {reviews.map(r => (
+            <div key={r.id} className="col-md-6 mb-3">
               <Card>
                 <Card.Body>
                   <Card.Title>
-                    Rating: <Badge bg="primary">{review.rating}/10</Badge>
+                    <Link to={`/movie/${r.movieId}`}>Movie ID: {r.movieId}</Link>
                   </Card.Title>
-                  <Card.Text>{review.reviewText}</Card.Text>
+                  <p><strong>Rating:</strong> {r.rating}/10</p>
+                  <p>{r.reviewText}</p>
                   <small className="text-muted">
-                    {new Date(review.createdAt?.toDate?.() || review.createdAt).toLocaleDateString()}
+                    {new Date(r.createdAt).toLocaleDateString()}
                   </small>
-                  <div className="mt-2">
-                    <Button
-                      size="sm"
-                      onClick={() => navigate(`/movie/${review.movieId}`)}
-                    >
-                      View Movie
-                    </Button>
-                  </div>
                 </Card.Body>
               </Card>
-            </Col>
+            </div>
           ))}
-        </Row>
+        </div>
       )}
     </div>
   );

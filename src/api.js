@@ -27,6 +27,15 @@ export const api = {
       .then(data => Array.isArray(data) ? data : [])
       .catch(() => []),
 
+  //get you reviews      
+  getUserReviews: (token) =>
+    fetch(`${API_BASE}/api/user/reviews`, {
+      headers: { "Authorization": `Bearer ${token}` }
+    })
+    .then(r => r.ok ? r.json() : [])
+    .then(data => Array.isArray(data) ? data : [])
+    .catch(() => []),
+
   // Post Review
   postReview: (data, token) =>
     fetch(`${API_BASE}/api/reviews`, {
